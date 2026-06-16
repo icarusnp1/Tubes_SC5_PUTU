@@ -1,125 +1,138 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
-from config import STT_MODEL_DIR, STT_SAMPLE_RATE, STT_FALLBACK_TEXT
+import librosa
+import torch
+from dotenv import load_dotenv
+from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
 
-_processor = None
-_model = None
-_device = None
-_last_error = None
+load_dotenv()
+
+HF_STT_MODEL = os.getenv(
+    "HF_STT_MODEL",
+    "indonesian-nlp/wav2vec2-large-xlsr-indonesian",
+)
+STT_ENABLED = os.getenv("STT_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+SAMPLE_RATE = 16000
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+_processor: Wav2Vec2Processor | None = None
+_model: Wav2Vec2ForCTC | None = None
 
 
-def clean_transcript(text: str) -> str:
-    text = (text or "").lower().strip()
+def clean_text(text: str) -> str:
+    """
+    Membersihkan hasil transkripsi agar lebih rapi.
+    """
+    text = (text or "").lower()
     text = re.sub(r"\s+", " ", text)
-    return text
-
-
-def is_stt_model_available() -> bool:
-    required_any_weight = (STT_MODEL_DIR / "model.safetensors").exists() or (STT_MODEL_DIR / "pytorch_model.bin").exists()
-    required_files = [
-        STT_MODEL_DIR / "config.json",
-        STT_MODEL_DIR / "vocab.json",
-        STT_MODEL_DIR / "tokenizer_config.json",
-    ]
-    return required_any_weight and all(path.exists() for path in required_files)
-
-
-def get_stt_status() -> dict:
-    return {
-        "available": is_stt_model_available(),
-        "model_dir": str(STT_MODEL_DIR),
-        "last_error": _last_error,
-    }
+    return text.strip()
 
 
 def load_stt_model():
-    """Load Wav2Vec2 model lokal hasil training.
-
-    Folder yang diharapkan:
-    backend/models/stt_model/config.json
-    backend/models/stt_model/model.safetensors atau pytorch_model.bin
-    backend/models/stt_model/vocab.json
-    backend/models/stt_model/tokenizer_config.json
     """
-    global _processor, _model, _device, _last_error
+    Load model Wav2Vec2 Bahasa Indonesia dari Hugging Face.
+    Pada pemanggilan pertama, model akan diunduh otomatis jika belum ada di cache lokal.
+    """
+    global _processor, _model
 
-    if _processor is not None and _model is not None:
-        return _processor, _model, _device
+    if _processor is None or _model is None:
+        print(f"[STT] Loading Hugging Face model: {HF_STT_MODEL}")
+        print(f"[STT] Device: {DEVICE}")
 
-    if not is_stt_model_available():
-        raise FileNotFoundError(
-            "Model STT belum tersedia. Masukkan file hasil training Wav2Vec2 ke backend/models/stt_model."
-        )
-
-    try:
-        import torch
-        from transformers import Wav2Vec2ForCTC, Wav2Vec2Processor
-
-        _device = "cuda" if torch.cuda.is_available() else "cpu"
-        _processor = Wav2Vec2Processor.from_pretrained(str(STT_MODEL_DIR))
-        _model = Wav2Vec2ForCTC.from_pretrained(str(STT_MODEL_DIR))
-        _model.to(_device)
+        _processor = Wav2Vec2Processor.from_pretrained(HF_STT_MODEL)
+        _model = Wav2Vec2ForCTC.from_pretrained(HF_STT_MODEL)
+        _model.to(DEVICE)
         _model.eval()
-        _last_error = None
-        return _processor, _model, _device
-    except Exception as exc:
-        _last_error = str(exc)
-        raise
+
+    return _processor, _model
 
 
-def transcribe_with_wav2vec2(audio_path: Path) -> str:
-    global _last_error
-    processor, model, device = load_stt_model()
+def transcribe_audio_file(audio_path: str | Path) -> str:
+    """
+    Mengubah file audio menjadi teks menggunakan Wav2Vec2.
+    Audio otomatis dikonversi ke 16 kHz mono menggunakan librosa.
+    """
+    processor, model = load_stt_model()
+
+    speech_array, _ = librosa.load(
+        str(audio_path),
+        sr=SAMPLE_RATE,
+        mono=True,
+    )
+
+    if speech_array.size == 0:
+        raise ValueError("Audio kosong atau tidak dapat dibaca.")
+
+    inputs = processor(
+        speech_array,
+        sampling_rate=SAMPLE_RATE,
+        return_tensors="pt",
+        padding=True,
+    )
+
+    input_values = inputs.input_values.to(DEVICE)
+
+    with torch.no_grad():
+        logits = model(input_values).logits
+
+    predicted_ids = torch.argmax(logits, dim=-1)
+    transcription = processor.batch_decode(predicted_ids)[0]
+
+    return clean_text(transcription)
+
+
+def transcribe_audio(audio_path: str | Path, fallback_text: str | None = None) -> dict:
+    """
+    Fungsi yang dipakai oleh main.py.
+    Return dibuat berbentuk dict agar cocok dengan endpoint /api/process-all.
+    """
+    fallback_text = clean_text(fallback_text or "")
+
+    if not STT_ENABLED:
+        return {
+            "text": fallback_text,
+            "mode": "fallback",
+            "error": "STT dinonaktifkan melalui STT_ENABLED=false.",
+        }
 
     try:
-        import torch
-        import librosa
-
-        speech, _ = librosa.load(str(audio_path), sr=STT_SAMPLE_RATE, mono=True)
-        inputs = processor(
-            speech,
-            sampling_rate=STT_SAMPLE_RATE,
-            return_tensors="pt",
-            padding=True,
-        )
-
-        with torch.no_grad():
-            logits = model(inputs.input_values.to(device)).logits
-
-        predicted_ids = torch.argmax(logits, dim=-1)
-        transcription = processor.batch_decode(predicted_ids)[0]
-        _last_error = None
-        return clean_transcript(transcription)
-    except Exception as exc:
-        _last_error = str(exc)
-        raise
-
-
-def transcribe_audio(audio_path: Path, fallback_text: str | None = None) -> dict:
-    """Return dict agar frontend tahu mode yang digunakan.
-
-    Jika model Wav2Vec2 tersedia, sistem memakai model asli.
-    Jika belum tersedia/error, sistem mengembalikan fallback text agar alur aplikasi tetap bisa diuji.
-    """
-    if is_stt_model_available():
-        try:
-            text = transcribe_with_wav2vec2(audio_path)
-            if text:
-                return {"text": text, "mode": "wav2vec2", "model_available": True, "error": None}
-        except Exception as exc:
+        text = transcribe_audio_file(audio_path)
+        if not text and fallback_text:
             return {
-                "text": clean_transcript(fallback_text or STT_FALLBACK_TEXT),
-                "mode": "fallback_after_stt_error",
-                "model_available": True,
+                "text": fallback_text,
+                "mode": "fallback",
+                "error": "Model STT menghasilkan teks kosong.",
+            }
+
+        return {
+            "text": text,
+            "mode": "huggingface_wav2vec2",
+            "error": None,
+        }
+    except Exception as exc:
+        if fallback_text:
+            return {
+                "text": fallback_text,
+                "mode": "fallback",
                 "error": str(exc),
             }
 
+        raise
+
+
+def get_stt_status() -> dict:
+    """
+    Status modul STT untuk endpoint /api/health.
+    """
     return {
-        "text": clean_transcript(fallback_text or STT_FALLBACK_TEXT),
-        "mode": "fallback_no_stt_model",
-        "model_available": False,
-        "error": None,
+        "enabled": STT_ENABLED,
+        "mode": "huggingface_wav2vec2",
+        "model": HF_STT_MODEL,
+        "sample_rate": SAMPLE_RATE,
+        "device": DEVICE,
+        "loaded": _processor is not None and _model is not None,
     }

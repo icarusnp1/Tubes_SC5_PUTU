@@ -9,9 +9,20 @@ from pydantic import BaseModel
 
 from config import APP_NAME, FRONTEND_ORIGIN, OUTPUT_DIR
 from services.audio_utils import save_upload_file
-from services.stt_service import transcribe_audio, get_stt_status
+from services.stt_service import transcribe_audio as run_stt, get_stt_status
 from services.summarizer_service import summarize_text, get_summarizer_status
 from services.tts_service import synthesize_speech, get_tts_status
+
+from fastapi import UploadFile, File
+from pathlib import Path
+import shutil
+import uuid
+
+from services.stt_service import transcribe_audio_file
+
+UPLOAD_DIR = Path("uploads")
+UPLOAD_DIR.mkdir(exist_ok=True)
+
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
 
@@ -61,19 +72,14 @@ def health():
 
 
 @app.post("/api/transcribe")
-async def transcribe(
+async def transcribe_endpoint(
     file: UploadFile = File(...),
     fallback_text: str | None = Form(default=None),
 ):
     try:
         audio_path = await save_upload_file(file)
-        result = transcribe_audio(audio_path, fallback_text=fallback_text)
-        return {
-            "transcription": result["text"],
-            "mode": result["mode"],
-            "model_available": result["model_available"],
-            "error": result["error"],
-        }
+        result = run_stt(audio_path, fallback_text=fallback_text)
+        return result
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -110,7 +116,8 @@ async def process_all(
     warnings: list[str] = []
     try:
         audio_path = await save_upload_file(file)
-        stt_result = transcribe_audio(audio_path, fallback_text=fallback_text)
+
+        stt_result = run_stt(audio_path, fallback_text=fallback_text)
         if stt_result.get("error"):
             warnings.append(f"STT: {stt_result['error']}")
 
