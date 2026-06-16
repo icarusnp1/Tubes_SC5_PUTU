@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.log
+
+# Node
+node_modules/
+dist/
+.env
+
+# Generated files
+backend/uploads/*
+!backend/uploads/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep
+
+# Model hasil training, jangan commit file model besar
+backend/models/stt_model/*
+!backend/models/stt_model/.gitkeep
+backend/models/tts_model/*
+!backend/models/tts_model/.gitkeep

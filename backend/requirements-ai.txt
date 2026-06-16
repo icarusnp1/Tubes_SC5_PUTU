@@ -1,0 +1,10 @@
+# Optional untuk STT Wav2Vec2 lokal
+# Install setelah backend dasar berhasil berjalan.
+torch
+transformers
+librosa
+safetensors
+soundfile
+
+# Optional untuk TTS VITS/Coqui lokal. Bisa berat dan bergantung versi Python.
+TTS
