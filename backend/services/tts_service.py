@@ -123,24 +123,41 @@ def synthesize_with_pyttsx3(text: str) -> dict:
 def synthesize_with_speecht5(text: str) -> dict:
     processor, model, vocoder, speaker_embeddings = load_speecht5()
     
-    # 1. Bersihkan teks dari simbol markdown Gemini (*, #, _, dll)
-    text = re.sub(r'[*_#`]', '', text)
-    text = re.sub(r'\n+', ' ', text)
-    text = text.strip()
+    # 1. Bersihkan teks dari simbol markdown dan karakter aneh
+    text = re.sub(r'[*_#`~]', '', text)
+    text = re.sub(r'[:;\n]', '.', text) # Ubah baris baru/titik dua jadi titik agar ikut terpotong
+    text = re.sub(r'[^a-zA-Z0-9\s.,!?-]', '', text) # Buang emoji/simbol tak terbaca
+    text = re.sub(r'\s+', ' ', text).strip()
     
-    # 2. Pecah teks menjadi kalimat-kalimat yang lebih pendek
-    # SpeechT5 memiliki batas maksimal token input (sekitar 600 karakter).
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    # 2. Pecah teks menjadi potongan sangat pendek
+    # Masalah "mengulang kata" atau "diam" terjadi karena batas token internal SpeechT5 mulai goyah
+    # jika lebih dari ~200 karakter. Kita batasi maksimal 180 karakter per potongan.
+    parts = re.split(r'(?<=[.,!?])\s+', text)
     
     final_chunks = []
     current_chunk = ""
-    for sentence in sentences:
-        if len(current_chunk) + len(sentence) < 400:
-            current_chunk += sentence + " "
+    for part in parts:
+        part = part.strip()
+        if not part: continue
+        
+        # Jika satu kalimat/potongan tanpa tanda baca ternyata sangat panjang, potong per kata
+        if len(part) > 180:
+            for w in part.split():
+                if len(current_chunk) + len(w) < 180:
+                    current_chunk += w + " "
+                else:
+                    if current_chunk.strip():
+                        final_chunks.append(current_chunk.strip())
+                    current_chunk = w + " "
+            continue
+
+        if len(current_chunk) + len(part) < 180:
+            current_chunk += part + " "
         else:
             if current_chunk.strip():
                 final_chunks.append(current_chunk.strip())
-            current_chunk = sentence + " "
+            current_chunk = part + " "
+            
     if current_chunk.strip():
         final_chunks.append(current_chunk.strip())
         
