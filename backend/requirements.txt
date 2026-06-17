@@ -6,3 +6,11 @@ pydantic
 google-genai
 pyttsx3
 numpy
+torch
+transformers
+librosa
+soundfile
+safetensors
+sentencepiece
+datasets
+torchvision
