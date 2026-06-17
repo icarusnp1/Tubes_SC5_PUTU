@@ -130,6 +130,7 @@ def get_stt_status() -> dict:
     """
     return {
         "enabled": STT_ENABLED,
+        "available": STT_ENABLED,
         "mode": "huggingface_wav2vec2",
         "model": HF_STT_MODEL,
         "sample_rate": SAMPLE_RATE,

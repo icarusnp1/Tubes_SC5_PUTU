@@ -8,7 +8,7 @@ Aplikasi ini merupakan implementasi sederhana berbasis **React.js** dan **FastAP
 - Proses Speech-to-Text menggunakan model Wav2Vec2 Bahasa Indonesia dari Hugging Face.
 - Menampilkan hasil transkripsi audio.
 - Membuat ringkasan catatan kuliah menggunakan Gemini API.
-- Menghasilkan audio ringkasan menggunakan TTS lokal `pyttsx3`.
+- Menghasilkan audio ringkasan menggunakan TTS lokal berbasis **SpeechT5 (Hugging Face)**.
 - Memutar hasil audio melalui audio player di website.
 - Menyediakan proses penuh dari audio sampai output audio.
 
@@ -29,7 +29,8 @@ Aplikasi ini merupakan implementasi sederhana berbasis **React.js** dan **FastAP
 - Hugging Face Transformers
 - Wav2Vec2
 - Gemini API
-- pyttsx3
+- SpeechT5 (Hugging Face)
+- pyttsx3 (sebagai fallback)
 - Librosa
 - PyTorch
 
@@ -80,7 +81,7 @@ Gemini API membuat ringkasan
 ↓
 Ringkasan dikirim ke modul TTS
 ↓
-pyttsx3 menghasilkan file audio
+SpeechT5 menghasilkan file audio
 ↓
 Website memutar audio ringkasan
 ```
@@ -114,7 +115,7 @@ pip install -r requirements.txt
 Jika ada library yang belum terinstall, jalankan:
 
 ```bash
-pip install fastapi uvicorn python-multipart python-dotenv google-genai pyttsx3 torch transformers librosa soundfile safetensors numpy
+pip install fastapi uvicorn python-multipart python-dotenv google-genai pyttsx3 torch transformers librosa soundfile safetensors numpy sentencepiece datasets
 ```
 
 Jika muncul error terkait `torchvision`, jalankan:
@@ -146,10 +147,11 @@ FRONTEND_ORIGIN=http://localhost:5173
 GEMINI_API_KEY=ISI_API_KEY_GEMINI_KAMU
 GEMINI_MODEL=gemini-1.5-flash
 
-HF_STT_MODEL=indonesian-nlp/wav2vec2-large-xlsr-indonesian
+HF_STT_MODEL=./models/stt_model
 STT_ENABLED=true
 
-TTS_MODE=pyttsx3
+TTS_ENGINE=speecht5
+HF_TTS_MODEL=./models/tts_model
 TTS_RATE=150
 TTS_VOLUME=1.0
 ```
@@ -158,8 +160,8 @@ Catatan:
 
 - Jangan upload file `.env` ke GitHub.
 - Jangan membagikan `GEMINI_API_KEY` ke orang lain.
-- `HF_STT_MODEL` memakai model Wav2Vec2 Bahasa Indonesia dari Hugging Face.
-- `TTS_MODE=pyttsx3` digunakan agar TTS lokal langsung dapat berjalan tanpa training model tambahan.
+- `HF_STT_MODEL` mengarah ke folder model lokal Wav2Vec2 Anda.
+- `TTS_ENGINE=speecht5` digunakan agar aplikasi menggunakan model AI SpeechT5 dari folder `models/tts_model/`. Pastikan Anda menaruh file `speaker_embeddings.pt` di dalamnya agar suara terdengar natural.
 
 ## 7. Login Hugging Face Opsional
 
@@ -308,7 +310,7 @@ Output:
 {
   "audio_url": "http://localhost:8000/outputs/tts_xxxxx.wav",
   "filename": "tts_xxxxx.wav",
-  "mode": "pyttsx3",
+  "mode": "speecht5",
   "error": null
 }
 ```
@@ -478,11 +480,11 @@ Jika ingin folder `models`, `uploads`, dan `outputs` tetap ada di repository, bu
 
 Implementasi saat ini menggunakan:
 
-- STT: Wav2Vec2 Bahasa Indonesia dari Hugging Face.
-- Ringkasan: Gemini API.
-- TTS: pyttsx3 sebagai library TTS lokal.
+- STT: Wav2Vec2 Bahasa Indonesia (Lokal).
+- Ringkasan: Gemini API (google-genai).
+- TTS: SpeechT5 (Hugging Face Lokal) dengan chunking text dan integrasi speaker embedding.
 
-Struktur backend dibuat modular sehingga model STT lokal atau TTS Neural seperti VITS/Coqui dapat ditambahkan pada pengembangan berikutnya tanpa mengubah keseluruhan aplikasi.
+Struktur backend dibuat modular sehingga berbagai engine (pyttsx3, SpeechT5) dapat dengan mudah dipilih via `.env`.
 
 ## 17. Status Implementasi
 
@@ -493,7 +495,7 @@ Struktur backend dibuat modular sehingga model STT lokal atau TTS Neural seperti
 | Upload audio | Berjalan |
 | STT Wav2Vec2 Hugging Face | Berjalan setelah model berhasil diunduh |
 | Ringkasan Gemini API | Membutuhkan API key |
-| TTS pyttsx3 | Berjalan sebagai TTS lokal |
+| TTS SpeechT5 | Berjalan sebagai TTS lokal dengan suara yang difine-tune |
 | Audio player | Berjalan |
 | Full pipeline | Berjalan jika STT, Gemini, dan TTS aktif |
 
